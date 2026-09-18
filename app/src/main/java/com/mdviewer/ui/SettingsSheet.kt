@@ -45,6 +45,13 @@ import kotlin.math.roundToInt
 /** 字号预设：不想拖滑块就点一个 */
 private val FONT_PRESETS = listOf("小" to 13, "标准" to 16, "大" to 20, "特大" to 24, "超大" to 30)
 
+/** 字体预设，key 要和 ReaderStyle 里认的那几个对上 */
+private val FONT_FAMILIES = listOf(
+    "SYSTEM" to "系统默认",
+    "SERIF" to "衷线",
+    "MONO" to "等宽",
+)
+
 /**
  * 阅读设置面板。
  *
@@ -91,6 +98,17 @@ fun ReaderSettingsSheet(settings: SettingsStore, onDismiss: () -> Unit) {
                 range = SettingsStore.FONT_MIN.toFloat()..SettingsStore.FONT_MAX.toFloat(),
                 steps = SettingsStore.FONT_MAX - SettingsStore.FONT_MIN - 1,
             ) { settings.setFontSize(it) }
+
+            // ---------------- 字体 ----------------
+            SectionTitle("字体")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FONT_FAMILIES.forEach { (key, label) ->
+                    PresetChip(label = label, selected = settings.fontFamilyKey == key) {
+                        settings.updateFontFamilyKey(key)
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
 
             // ---------------- 排版 ----------------
             SectionTitle("排版")
@@ -165,16 +183,19 @@ fun ReaderSettingsSheet(settings: SettingsStore, onDismiss: () -> Unit) {
             Text("预览效果", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(6.dp))
             Column(Modifier.padding(horizontal = settings.marginDp.dp)) {
+                val previewFont = LocalReaderStyle.current.fontFamily
                 Text(
                     text = "攻角 α 与升力系数 C\u2097 的关系见式 (3.10)，当 α∈[6°, 18°] 时近似线性。",
                     fontSize = settings.fontSizeSp.sp,
                     lineHeight = (settings.fontSizeSp * settings.lineHeightPercent / 100f).sp,
+                    fontFamily = previewFont,
                 )
                 Spacer(Modifier.height(settings.paragraphSpacingDp.dp))
                 Text(
                     text = "这是第二段，用来观察段落间距和行距。",
                     fontSize = settings.fontSizeSp.sp,
                     lineHeight = (settings.fontSizeSp * settings.lineHeightPercent / 100f).sp,
+                    fontFamily = previewFont,
                 )
             }
         }

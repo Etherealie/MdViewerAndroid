@@ -162,4 +162,48 @@ class MarkdownParserTest {
         assertTrue(doc.blocks.isEmpty())
         assertTrue(doc.toc.isEmpty())
     }
+
+    // ---------------- 任务列表的行号（勾选时要靠它写回源文件） ----------------
+
+    private fun taskLines(src: String): List<Int> {
+        // 列表可能藏在引用里面，先钻一层
+        val blocks = parse(src).blocks.flatMap { block ->
+            if (block is MdBlock.Quote) block.children else listOf(block)
+        }
+        return blocks.filterIsInstance<MdBlock.BulletList>()
+            .flatMap { it.items }
+            .filter { it.checked != null }
+            .map { it.sourceLine }
+    }
+
+    @Test
+    fun task_items_track_source_line() {
+        val src = "- [ ] 甲\n- [x] 乙\n"
+        assertEquals(listOf(0, 1), taskLines(src))
+    }
+
+    @Test
+    fun task_line_counts_the_heading_above() {
+        val src = "# 标题\n\n- [ ] 甲\n"
+        assertEquals(listOf(2), taskLines(src))
+    }
+
+    @Test
+    fun task_line_inside_quote() {
+        val src = "> - [ ] 甲\n> - [x] 乙\n"
+        assertEquals(listOf(0, 1), taskLines(src))
+    }
+
+    @Test
+    fun task_line_after_paragraph_blank_lines() {
+        val src = "前面一段话\n\n\n- [ ] 甲\n"
+        assertEquals(listOf(3), taskLines(src))
+    }
+
+    @Test
+    fun checked_flag_is_parsed() {
+        val list = parse("- [ ] 甲\n- [x] 乙\n- [X] 丙\n- 普通\n")
+            .blocks.filterIsInstance<MdBlock.BulletList>().first()
+        assertEquals(listOf(false, true, true, null), list.items.map { it.checked })
+    }
 }

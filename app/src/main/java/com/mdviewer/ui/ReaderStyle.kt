@@ -1,6 +1,7 @@
 package com.mdviewer.ui
 
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.text.font.FontFamily
 
 /**
  * 阅读界面的排版参数。
@@ -17,7 +18,16 @@ data class ReaderStyle(
     val lineHeightPercent: Int = 175,
     /** 段落之间的额外间距 dp */
     val paragraphSpacingDp: Int = 6,
+    /** 正文字体：SYSTEM / SERIF / MONO */
+    val fontFamilyKey: String = "SYSTEM",
 ) {
+    /** 正文字体（null = 系统默认） */
+    val fontFamily: FontFamily?
+        get() = when (fontFamilyKey) {
+            "SERIF" -> FontFamily.Serif
+            "MONO" -> FontFamily.Monospace
+            else -> null
+        }
     /** 正文行高（sp） */
     val lineHeightSp: Float get() = fontSizeSp * lineHeightPercent / 100f
 

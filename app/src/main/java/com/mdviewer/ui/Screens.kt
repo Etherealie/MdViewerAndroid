@@ -30,17 +30,23 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -50,14 +56,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,8 +76,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,7 +90,10 @@ import com.mdviewer.data.DocStore
 import com.mdviewer.data.SettingsStore
 import com.mdviewer.markdown.MdBlock
 import com.mdviewer.markdown.MdDocument
+import com.mdviewer.markdown.InlineText
+import com.mdviewer.markdown.ListItem
 import com.mdviewer.markdown.MarkdownParser
+import com.mdviewer.markdown.TextStats
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
@@ -376,12 +391,90 @@ fun ReaderScreen(
     var doc by remember(entry) { mutableStateOf<MdDocument?>(null) }
     var error by remember(entry) { mutableStateOf<String?>(null) }
     var editing by remember(entry) { mutableStateOf(false) }
-    var draft by remember(entry) { mutableStateOf("") }
+    var draft by remember(entry) { mutableStateOf(TextFieldValue("")) }
     var tocOpen by remember(entry) { mutableStateOf(false) }
     var settingsOpen by remember(entry) { mutableStateOf(false) }
     var loading by remember(entry) { mutableStateOf(true) }
+    var menuOpen by remember(entry) { mutableStateOf(false) }
+    var searchOpen by remember(entry) { mutableStateOf(false) }
+    var query by remember(entry) { mutableStateOf("") }
+    var matchIndex by remember(entry) { mutableIntStateOf(0) }
+    var pendingLeave by remember(entry) { mutableStateOf(false) }
+    var previewInEdit by remember(entry) { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
+
+    // 命中的块下标（一个块里可能命中多处，导航按块跳）
+    val matches = remember(doc, query) {
+        val d = doc
+        if (d == null || query.isBlank()) emptyList() else searchMatchIndices(d, query)
+    }
+    val dirty = editing && draft.text != raw
+    val wordCount = remember(raw) { TextStats.countWords(raw) }
+
+    // 查找：输入后自动跳到第一处命中
+    LaunchedEffect(query, doc) {
+        matchIndex = 0
+        if (query.isNotBlank() && matches.isNotEmpty()) {
+            listState.scrollToItem(matches.first())
+        }
+    }
+
+    fun saveDraft(onDone: () -> Unit = {}) {
+        scope.launch {
+            try {
+                store.write(entry, draft.text)
+                val text = store.read(entry)
+                raw = text
+                doc = MarkdownParser.parse(text)
+                editing = false
+                previewInEdit = false
+                Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
+                onDone()
+            } catch (e: Exception) {
+                Toast.makeText(context, "保存失败：${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun requestLeave() {
+        when {
+            dirty -> pendingLeave = true
+            editing -> { editing = false; previewInEdit = false }
+            searchOpen -> { searchOpen = false; query = "" }
+            settingsOpen -> settingsOpen = false
+            tocOpen -> tocOpen = false
+            else -> onBack()
+        }
+    }
+
+    fun jumpToMatch(index: Int) {
+        if (matches.isEmpty()) return
+        val safe = ((index % matches.size) + matches.size) % matches.size
+        matchIndex = safe
+        scope.launch { listState.animateScrollToItem(matches[safe]) }
+    }
+
+    // 点任务框：直接改磁盘上那一行，不用进编辑模式
+    fun toggleTask(item: ListItem, checked: Boolean) {
+        val label = (item.blocks.firstOrNull() as? MdBlock.Paragraph)?.text?.text ?: ""
+        scope.launch {
+            val ok = try {
+                store.toggleTask(entry, item.sourceLine, label, checked)
+            } catch (e: Exception) {
+                false
+            }
+            if (ok) {
+                try {
+                    val text = store.read(entry)
+                    raw = text
+                    doc = MarkdownParser.parse(text)
+                } catch (_: Exception) { }
+            } else {
+                Toast.makeText(context, "定位不到这一行，请进「编辑」手动改", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     LaunchedEffect(entry) {
         loading = true
@@ -392,7 +485,7 @@ fun ReaderScreen(
             doc = MarkdownParser.parse(text)
             store.markRecent(entry)
             if (startInEdit) {
-                draft = text
+                draft = TextFieldValue(text)
                 editing = true
                 onStartEditConsumed()
             }
@@ -402,16 +495,8 @@ fun ReaderScreen(
         loading = false
     }
 
-    // 返回键的处理顺序：先退出编辑 → 再关面板 → 最后才回到文件列表。
-    // 之前只处理了"编辑中"，其余情况没接管，系统就直接把 App 退出了。
-    BackHandler(enabled = true) {
-        when {
-            editing -> editing = false
-            settingsOpen -> settingsOpen = false
-            tocOpen -> tocOpen = false
-            else -> onBack()
-        }
-    }
+    // 返回键顺序：未保存确认 → 退出编辑 → 关面板/查找 → 回文件列表
+    BackHandler(enabled = true) { requestLeave() }
 
     // 阅读时保持屏幕常亮（离开页面自动撤销）
     val view = LocalView.current
@@ -433,42 +518,64 @@ fun ReaderScreen(
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = { if (editing) editing = false else onBack() }) {
+                    IconButton(onClick = { requestLeave() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     }
                 },
                 title = {
                     Column {
                         Text(entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 16.sp)
-                        if (settings.showProgress && !editing) {
-                            ReadingProgress(listState)
+                        if (editing) {
+                            val now = TextStats.countWords(draft.text)
+                            Text(
+                                text = if (dirty) "● 未保存 · $now 字" else "$now 字",
+                                fontSize = 11.sp,
+                                color = if (dirty) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            ReaderStatusLine(listState, wordCount, settings.showProgress)
                         }
                     }
                 },
                 actions = {
                     if (editing) {
-                        TextButton(onClick = {
-                            scope.launch {
-                                try {
-                                    store.write(entry, draft)
-                                    val text = store.read(entry)
-                                    raw = text
-                                    doc = MarkdownParser.parse(text)
-                                    editing = false
-                                    Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "保存失败：${e.message}", Toast.LENGTH_LONG).show()
-                                }
-                            }
-                        }) { Text("保存") }
-                        TextButton(onClick = { editing = false }) { Text("取消") }
-                    } else {
-                        IconButton(onClick = { settingsOpen = true }) {
-                            Icon(Icons.Default.Settings, "阅读设置")
+                        TextButton(onClick = { previewInEdit = !previewInEdit }) {
+                            Text(if (previewInEdit) "编辑" else "预览")
                         }
+                        TextButton(onClick = { saveDraft() }) { Text("保存") }
+                        TextButton(onClick = { requestLeave() }) { Text("取消") }
+                    } else {
+                        IconButton(onClick = {
+                            searchOpen = !searchOpen
+                            if (!searchOpen) query = ""
+                        }) { Icon(Icons.Default.Search, "查找") }
                         IconButton(onClick = { tocOpen = true }) { Icon(Icons.AutoMirrored.Filled.List, "大纲") }
-                        IconButton(onClick = { draft = raw; editing = true }) {
-                            Icon(Icons.Default.Create, "编辑")
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) { Icon(Icons.Default.MoreVert, "更多") }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("编辑") },
+                                    onClick = {
+                                        menuOpen = false
+                                        draft = TextFieldValue(raw, TextRange(raw.length))
+                                        previewInEdit = false
+                                        editing = true
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("阅读设置") },
+                                    onClick = { menuOpen = false; settingsOpen = true },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("分享原文") },
+                                    onClick = { menuOpen = false; shareText(context, entry.name, raw) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("复制全文") },
+                                    onClick = { menuOpen = false; copyToClipboard(context, raw) },
+                                )
+                            }
                         }
                     }
                 },
@@ -488,50 +595,90 @@ fun ReaderScreen(
                     Text("读取失败：$error", color = MaterialTheme.colorScheme.error)
                 }
 
-                editing -> androidx.compose.foundation.text.BasicTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    textStyle = androidx.compose.ui.text.TextStyle(
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 13.5.sp,
-                        lineHeight = 22.sp,
-                        color = MaterialTheme.colorScheme.onBackground,
-                    ),
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(12.dp),
-                )
-
-                else -> {
-                    val blocks = doc?.blocks ?: emptyList()
+                // 编辑态也可以看一眼渲染效果（看不明白的表格/公式免盲写）
+                editing && previewInEdit -> {
+                    val previewDoc = remember(draft.text) { MarkdownParser.parse(draft.text) }
                     LazyColumn(
-                        state = listState,
-                        contentPadding = PaddingValues(
-                            start = settings.marginDp.dp,
-                            end = settings.marginDp.dp + 6.dp,
-                            top = 8.dp,
-                            bottom = 64.dp,
-                        ),
+                        state = rememberLazyListState(),
+                        contentPadding = PaddingValues(settings.marginDp.dp, 8.dp, settings.marginDp.dp + 6.dp, 64.dp),
+                        modifier = Modifier.fillMaxSize(),
                     ) {
-                        itemsIndexed(blocks) { _, block ->
-                            BlockView(block, onCopy = { copyToClipboard(context, it) })
-                        }
-                        item {
-                            Spacer(Modifier.height(24.dp))
-                            Text(
-                                text = "${blocks.size} 个块 · 右上角可编辑或调字号",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        itemsIndexed(previewDoc.blocks) { _, block -> BlockView(block) }
                     }
-                    // 右侧滚动条（长度和位置随内容实时变化）
-                    ScrollIndicator(
-                        state = listState,
-                        enabled = settings.showScrollbar,
-                        modifier = Modifier.align(Alignment.CenterEnd),
+                }
+
+                editing -> Column(Modifier.fillMaxSize()) {
+                    MarkdownEditToolbar(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        modifier = Modifier.fillMaxWidth(),
                     )
+                    BasicTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.5.sp,
+                            lineHeight = 22.sp,
+                            color = MaterialTheme.colorScheme.onBackground,
+                        ),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                        visualTransformation = rememberMarkdownSourceHighlight(),
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp),
+                    )
+                }
+
+                else -> Column(Modifier.fillMaxSize()) {
+                    if (searchOpen) {
+                        ReaderSearchBar(
+                            query = query,
+                            onQueryChange = { query = it },
+                            current = if (matches.isEmpty()) 0 else matchIndex + 1,
+                            total = matches.size,
+                            onPrev = { jumpToMatch(matchIndex - 1) },
+                            onNext = { jumpToMatch(matchIndex + 1) },
+                            onClose = { searchOpen = false; query = "" },
+                        )
+                    }
+                    val blocks = doc?.blocks ?: emptyList()
+                    Box(Modifier.weight(1f)) {
+                        CompositionLocalProvider(LocalSearchQuery provides query) {
+                            LazyColumn(
+                                state = listState,
+                                contentPadding = PaddingValues(
+                                    start = settings.marginDp.dp,
+                                    end = settings.marginDp.dp + 6.dp,
+                                    top = 8.dp,
+                                    bottom = 64.dp,
+                                ),
+                            ) {
+                                itemsIndexed(blocks) { _, block ->
+                                    BlockView(
+                                        block,
+                                        onCopy = { copyToClipboard(context, it) },
+                                        onToggleTask = { item, checked -> toggleTask(item, checked) },
+                                    )
+                                }
+                                item {
+                                    Spacer(Modifier.height(24.dp))
+                                    Text(
+                                        text = "$wordCount 字 · ${blocks.size} 个块 · 右上角菜单里可以编辑",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                        // 右侧滚动条（长度和位置随内容实时变化）
+                        ScrollIndicator(
+                            state = listState,
+                            enabled = settings.showScrollbar,
+                            modifier = Modifier.align(Alignment.CenterEnd),
+                        )
+                    }
                 }
             }
         }
@@ -579,23 +726,144 @@ fun ReaderScreen(
             }
         }
     }
+
+    // 改了没保存就想走？先问一句，别白写
+    if (pendingLeave) {
+        AlertDialog(
+            onDismissRequest = { pendingLeave = false },
+            title = { Text("还没保存") },
+            text = { Text("这篇文档的改动还没写进文件，离开就会丢掉。") },
+            confirmButton = {
+                TextButton(onClick = { pendingLeave = false; saveDraft() }) { Text("保存") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = {
+                        pendingLeave = false
+                        draft = TextFieldValue(raw)
+                        editing = false
+                        previewInEdit = false
+                    }) { Text("放弃修改") }
+                    TextButton(onClick = { pendingLeave = false }) { Text("继续编辑") }
+                }
+            },
+        )
+    }
 }
 
-/** 标题下的阅读进度。单独抽出来，滚动时只重组这一小块，不影响整页 */
+/** 标题下的状态行：字数（+ 可选的阅读进度） */
 @Composable
-private fun ReadingProgress(state: LazyListState) {
+private fun ReaderStatusLine(state: LazyListState, wordCount: Int, showProgress: Boolean) {
+    val percent = if (showProgress) readPercent(state) else null
+    val text = when {
+        wordCount > 0 && percent != null -> "$wordCount 字 · $percent% 已读"
+        wordCount > 0 -> "$wordCount 字"
+        percent != null -> "$percent% 已读"
+        else -> ""
+    }
+    if (text.isEmpty()) return
+    Text(text = text, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** 已读百分比。只读 layoutInfo，滚动时只重组这一小块 */
+@Composable
+private fun readPercent(state: LazyListState): Int? {
     val info = state.layoutInfo
     val total = info.totalItemsCount
-    if (total <= 1) return
-    val first = info.visibleItemsInfo.firstOrNull() ?: return
+    if (total <= 1) return null
+    val first = info.visibleItemsInfo.firstOrNull() ?: return null
     val inItem = ((first.offset - info.viewportStartOffset).toFloat() /
         first.size.coerceAtLeast(1)).coerceIn(0f, 1f)
-    val fraction = ((first.index + inItem) / total).coerceIn(0f, 1f)
-    Text(
-        text = "${(fraction * 100).roundToInt()}% 已读",
-        fontSize = 11.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    return ((first.index + inItem) / total * 100).roundToInt().coerceIn(0, 100)
+}
+
+/** 把原文交给系统分享面板（微信/邮件/笔记类应用都能接） */
+private fun shareText(context: Context, title: String, text: String) {
+    try {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, title)
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        context.startActivity(Intent.createChooser(intent, "分享到").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    } catch (e: Exception) {
+        Toast.makeText(context, "没有可分享的应用", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** 文档内查找的输入条 */
+@Composable
+private fun ReaderSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    current: Int,
+    total: Int,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(start = 10.dp, end = 2.dp),
+        ) {
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                decorationBox = { inner ->
+                    Box {
+                        if (query.isEmpty()) {
+                            Text(
+                                text = "查找…",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        inner()
+                    }
+                },
+                modifier = Modifier.weight(1f).padding(vertical = 10.dp),
+            )
+            Text(
+                text = if (total == 0) "无结果" else "$current/$total",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            IconButton(onClick = onPrev, enabled = total > 0) { Icon(Icons.Default.KeyboardArrowUp, "上一个") }
+            IconButton(onClick = onNext, enabled = total > 0) { Icon(Icons.Default.KeyboardArrowDown, "下一个") }
+            IconButton(onClick = onClose) { Icon(Icons.Default.Close, "关闭查找") }
+        }
+    }
+}
+
+/** 命中查询词的顶层块下标（大小写不敏感） */
+private fun searchMatchIndices(doc: MdDocument, query: String): List<Int> {
+    val needle = query.lowercase()
+    val out = ArrayList<Int>()
+    doc.blocks.forEachIndexed { index, block ->
+        if (blockText(block).lowercase().contains(needle)) out.add(index)
+    }
+    return out
+}
+
+/** 把一个块（含嵌套）的文字抖平，只用于查找 */
+private fun blockText(block: MdBlock): String = when (block) {
+    is MdBlock.Heading -> block.text.text
+    is MdBlock.Paragraph -> block.text.text
+    is MdBlock.Code -> block.code
+    is MdBlock.Quote -> block.children.joinToString(" ") { blockText(it) }
+    is MdBlock.BulletList -> block.items.joinToString(" ") { item ->
+        item.blocks.joinToString(" ") { blockText(it) }
+    }
+
+    is MdBlock.Table -> (block.header + block.rows.flatten()).joinToString(" ") { it.text }
+    is MdBlock.FrontMatter -> block.entries.joinToString(" ") { "${it.first}: ${it.second}" }
+    MdBlock.Divider -> ""
 }
 
 /** 从 Compose 的 Context 里一路往内找 Activity（可能是被包装过的） */

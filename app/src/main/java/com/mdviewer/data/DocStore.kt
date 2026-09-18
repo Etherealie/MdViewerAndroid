@@ -166,6 +166,42 @@ class DocStore(private val context: Context) {
         )
     }
 
+    /**
+     * 勾选/取消勾选一个任务列表项，并写回文件。
+     *
+     * 写之前会校验目标行，避免"改错行"把文档搞坏：
+     *   1. 优先用解析器给的行号；
+     *   2. 该行必须真的是任务行，且文字与解析出的文字一致（去掉 markdown 符号后比较）；
+     *   3. 校验不过就全文找匹配行，只有**唯一**匹配才动；否则返回 false，让上层提示用户去编辑模式改。
+     */
+    suspend fun toggleTask(
+        entry: DocEntry,
+        sourceLine: Int,
+        itemText: String,
+        checked: Boolean,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val text = read(entry)
+        val lines = text.split("\n").toMutableList()
+
+        fun matches(line: String): Boolean {
+            val m = TASK_LINE.find(line) ?: return false
+            return normalizeMarkdown(m.groupValues[4]) == normalizeMarkdown(itemText)
+        }
+
+        val target = when {
+            sourceLine in lines.indices && matches(lines[sourceLine]) -> sourceLine
+            else -> lines.indices.filter { matches(lines[it]) }.singleOrNull() ?: -1
+        }
+        if (target < 0) return@withContext false
+
+        val old = lines[target]
+        val updated = old.replaceFirst(TASK_BOX, if (checked) "[x]" else "[ ]")
+        if (updated == old) return@withContext true
+        lines[target] = updated
+        write(entry, lines.joinToString("\n"))
+        true
+    }
+
     /** 宽松解码：优先 UTF-8，遇到替换字符就退回 GB18030（很多中文 md 是 GBK 存的） */
     private fun decode(bytes: ByteArray): String {
         val utf8 = String(bytes, Charsets.UTF_8)
@@ -200,5 +236,13 @@ class DocStore(private val context: Context) {
         private const val MAX_RECENT = 12
 
         val EXTENSIONS = setOf("md", "markdown", "mdown", "mkd", "mdx", "txt", "rst", "log")
+
+        /** 任务行：`- [ ] 文字` / `* [x] 文字` */
+        private val TASK_LINE = Regex("^(\\s*[-*+]\\s+)\\[([ xX])\\](\\s+)(.*)$")
+        private val TASK_BOX = Regex("\\[[ xX]\\]")
+
+        /** 去掉 markdown 符号后比较文字，避免"**粗**"和"粗"对不上 */
+        private fun normalizeMarkdown(s: String): String =
+            s.replace(Regex("[*_`~]"), "").replace(Regex("\\s+"), " ").trim()
     }
 }

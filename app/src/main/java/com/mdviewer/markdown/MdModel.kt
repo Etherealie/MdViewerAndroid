@@ -46,6 +46,8 @@ data class ListItem(
     val marker: String,
     val checked: Boolean? = null,      // 任务列表：[ ] -> false，[x] -> true，普通项 -> null
     val blocks: List<MdBlock>,
+    /** 这一项在源文件里的行号（从 0 数），勾选任务时要靠它定位；-1 表示未知 */
+    val sourceLine: Int = -1,
 )
 
 /** 块级元素 */

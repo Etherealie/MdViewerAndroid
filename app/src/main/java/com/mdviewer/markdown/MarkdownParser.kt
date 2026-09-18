@@ -62,7 +62,7 @@ object MarkdownParser {
         }
     }
 
-    private class RawItem(val marker: String) {
+    private class RawItem(val marker: String, val absLine: Int) {
         val body = ArrayList<String>()
     }
 
@@ -92,7 +92,11 @@ object MarkdownParser {
 
     // ------------------------------------------------------------------ 块级主循环
 
-    private fun parseBlocks(lines: List<String>, st: State, depth: Int): List<MdBlock> {
+    /**
+     * @param baseLine lines[0] 对应源文件里的第几行（从 0 数）。
+     *        引用、列表会把自己的起始行传下去，这样每一项都能记住自己的源码行号。
+     */
+    private fun parseBlocks(lines: List<String>, st: State, depth: Int, baseLine: Int = 0): List<MdBlock> {
         val out = ArrayList<MdBlock>()
         var i = 0
 
@@ -137,6 +141,7 @@ object MarkdownParser {
 
             // 4) 引用（可嵌套）
             if (RE_QUOTE.matchEntire(line) != null) {
+                val quoteStart = i
                 val buf = ArrayList<String>()
                 while (i < lines.size) {
                     val m = RE_QUOTE.matchEntire(lines[i])
@@ -146,7 +151,7 @@ object MarkdownParser {
                         buf.add(""); i++
                     } else break
                 }
-                out.add(MdBlock.Quote(parseBlocks(buf, st, depth + 1)))
+                out.add(MdBlock.Quote(parseBlocks(buf, st, depth + 1, baseLine + quoteStart)))
                 continue
             }
 
@@ -168,7 +173,7 @@ object MarkdownParser {
 
             // 6) 列表
             if (RE_UL.matchEntire(line) != null || RE_OL.matchEntire(line) != null) {
-                val (block, next) = parseList(lines, i, st, depth)
+                val (block, next) = parseList(lines, i, st, depth, baseLine)
                 out.add(block)
                 i = next
                 continue
@@ -247,6 +252,7 @@ object MarkdownParser {
         start: Int,
         st: State,
         depth: Int,
+        baseLine: Int,
     ): Pair<MdBlock.BulletList, Int> {
         val firstLine = lines[start]
         val firstOl = RE_OL.matchEntire(firstLine)
@@ -273,7 +279,9 @@ object MarkdownParser {
                         leadingSpaces(lines[j]) >= base + items.last().marker.length + 1
                     }
                     if (keepGoing) {
-                        items.last().body.add("")
+                        // 补充几个空行就补几个 body 行，保证 body[k] 永远对应源码第 absLine+k 行，
+                        // 不然嵌套列表的行号会整体偏掉
+                        repeat(j - i) { items.last().body.add("") }
                         i = j
                         continue
                     }
@@ -291,7 +299,7 @@ object MarkdownParser {
                     if (items.isEmpty()) break
                     items.last().body.add(line)
                 } else {
-                    val item = RawItem(m.groupValues[2])
+                    val item = RawItem(m.groupValues[2], baseLine + i)
                     item.body.add(m.groupValues[3])
                     items.add(item)
                 }
@@ -319,7 +327,12 @@ object MarkdownParser {
                 checked = task.groupValues[1].equals("x", ignoreCase = true)
                 body[0] = task.groupValues[2]
             }
-            ListItem(raw.marker, checked, parseBlocks(body, st, depth + 1))
+            ListItem(
+                marker = raw.marker,
+                checked = checked,
+                blocks = parseBlocks(body, st, depth + 1, raw.absLine),
+                sourceLine = raw.absLine,
+            )
         }
 
         return MdBlock.BulletList(rendered, ordered, startNumber) to i

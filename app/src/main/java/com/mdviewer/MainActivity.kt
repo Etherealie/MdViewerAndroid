@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
                             marginDp = settings.marginDp,
                             lineHeightPercent = settings.lineHeightPercent,
                             paragraphSpacingDp = settings.paragraphSpacingDp,
+                            fontFamilyKey = settings.fontFamilyKey,
                         ),
                     ) {
                         AppRoot(settings)

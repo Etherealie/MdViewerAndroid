@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +51,23 @@ import com.mdviewer.markdown.InlineStyle
 import com.mdviewer.markdown.InlineText
 import com.mdviewer.markdown.ListItem
 import com.mdviewer.markdown.MdBlock
+import com.mdviewer.markdown.SyntaxHighlighter
+import com.mdviewer.markdown.TokenKind
+
+/**
+ * 当前搜索的关键词。非空时，所有出现这个词的地方都会加底色。
+ * 由阅读页在开始搜索时提供，往下自动作用于每个 InlineText。
+ */
+val LocalSearchQuery = compositionLocalOf { "" }
+
+/** 代码高亮的配色（浅色/深色两套，取自 GitHub 风格） */
+private fun tokenColor(kind: TokenKind, dark: Boolean): Color = when (kind) {
+    TokenKind.KEYWORD -> if (dark) Color(0xFFFF7B72) else Color(0xFFCF222E)
+    TokenKind.STRING -> if (dark) Color(0xFFA5D6FF) else Color(0xFF0A3069)
+    TokenKind.COMMENT -> if (dark) Color(0xFF8B949E) else Color(0xFF6E7781)
+    TokenKind.NUMBER -> if (dark) Color(0xFF79C0FF) else Color(0xFF0550AE)
+    TokenKind.TYPE -> if (dark) Color(0xFFD2A8FF) else Color(0xFF8250DF)
+}
 
 /**
  * 把 [InlineText]（纯文本 + 样式区间）转成 Compose 的 AnnotatedString。
@@ -60,9 +79,12 @@ fun InlineText.toAnnotated(): AnnotatedString {
     val codeBg = MaterialTheme.colorScheme.surfaceVariant
     val codeFg = if (MaterialTheme.colorScheme.background.isDarkColor()) Color(0xFF79C0FF) else Color(0xFF953800)
     val size = LocalReaderStyle.current.fontSizeSp.toFloat()
+    val query = LocalSearchQuery.current
+    val markColor = if (MaterialTheme.colorScheme.background.isDarkColor()) Color(0xFF9E6A03).copy(alpha = 0.55f)
+    else Color(0xFFFFE082).copy(alpha = 0.85f)
     val source = this
 
-    return remember(source, linkColor, codeBg, codeFg, size) {
+    return remember(source, linkColor, codeBg, codeFg, size, query, markColor) {
         buildAnnotatedString {
             append(source.text)
             for (span in source.spans) {
@@ -107,6 +129,15 @@ fun InlineText.toAnnotated(): AnnotatedString {
                     }
                 }
             }
+
+            // 搜索命中：所有出现的地方都加底色（放在最后，盖在其它样式上面）
+            if (query.isNotEmpty()) {
+                var at = source.text.indexOf(query, 0, ignoreCase = true)
+                while (at >= 0) {
+                    addStyle(SpanStyle(background = markColor), at, at + query.length)
+                    at = source.text.indexOf(query, at + query.length, ignoreCase = true)
+                }
+            }
         }
     }
 }
@@ -137,6 +168,7 @@ fun HeadingBlock(block: MdBlock.Heading, modifier: Modifier = Modifier) {
             fontSize = size.sp,
             fontWeight = FontWeight.Bold,
             lineHeight = (size * 1.35f).sp,
+            fontFamily = reader.fontFamily,
             color = MaterialTheme.colorScheme.onBackground,
         )
         if (block.level <= 2) {
@@ -149,6 +181,22 @@ fun HeadingBlock(block: MdBlock.Heading, modifier: Modifier = Modifier) {
 @Composable
 fun CodeBlock(block: MdBlock.Code, onCopy: (String) -> Unit, modifier: Modifier = Modifier) {
     val reader = LocalReaderStyle.current
+    val dark = MaterialTheme.colorScheme.background.isDarkColor()
+    // 语法高亮：把代码切成关键字/字符串/注释/数字，只做一次
+    val highlighted = remember(block.code, block.language, dark) {
+        val tokens = SyntaxHighlighter.tokenize(block.code, block.language)
+        buildAnnotatedString {
+            var last = 0
+            for (token in tokens) {
+                if (token.start > last) append(block.code.substring(last, token.start))
+                withStyle(SpanStyle(color = tokenColor(token.kind, dark))) {
+                    append(block.code.substring(token.start, token.end))
+                }
+                last = token.end
+            }
+            if (last < block.code.length) append(block.code.substring(last))
+        }
+    }
     Column(
         modifier
             .fillMaxWidth()
@@ -175,7 +223,7 @@ fun CodeBlock(block: MdBlock.Code, onCopy: (String) -> Unit, modifier: Modifier 
         }
         // 代码不折行、横向滚动，缩进才不会被压扁
         Text(
-            text = block.code,
+            text = highlighted,
             fontFamily = FontFamily.Monospace,
             fontSize = reader.code.sp,
             lineHeight = (reader.code * 1.55f).sp,
@@ -215,16 +263,24 @@ fun QuoteBlock(block: MdBlock.Quote, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ListBlock(block: MdBlock.BulletList, modifier: Modifier = Modifier) {
+fun ListBlock(block: MdBlock.BulletList, onToggleTask: ((ListItem, Boolean) -> Unit)? = null, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().padding(vertical = 3.dp)) {
         block.items.forEachIndexed { index, item ->
-            ListRow(item = item, marker = if (block.ordered) "${block.start + index}." else "•")
+            ListRow(
+                item = item,
+                marker = if (block.ordered) "${block.start + index}." else "•",
+                onToggleTask = onToggleTask,
+            )
         }
     }
 }
 
 @Composable
-private fun ListRow(item: ListItem, marker: String) {
+private fun ListRow(
+    item: ListItem,
+    marker: String,
+    onToggleTask: ((ListItem, Boolean) -> Unit)?,
+) {
     val reader = LocalReaderStyle.current
     Row(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
         Box(
@@ -236,13 +292,14 @@ private fun ListRow(item: ListItem, marker: String) {
             if (item.checked != null) {
                 Checkbox(
                     checked = item.checked,
-                    onCheckedChange = null,
+                    onCheckedChange = if (onToggleTask != null) { v -> onToggleTask(item, v) } else null,
                     modifier = Modifier.size(18.dp),
                 )
             } else {
                 Text(
                     text = marker,
                     fontSize = reader.fontSizeSp.sp,
+                    fontFamily = reader.fontFamily,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.End,
                     modifier = Modifier.fillMaxWidth().padding(end = 6.dp),
@@ -250,7 +307,7 @@ private fun ListRow(item: ListItem, marker: String) {
             }
         }
         Column(Modifier.weight(1f)) {
-            item.blocks.forEach { child -> BlockView(child, isInsideList = true) }
+            item.blocks.forEach { child -> BlockView(child, onToggleTask = onToggleTask, isInsideList = true) }
         }
     }
 }
@@ -286,6 +343,7 @@ private fun TableRow(cells: List<InlineText>, aligns: List<ColumnAlign>, header:
             Text(
                 text = cell.toAnnotated(),
                 fontSize = reader.scaled(0.94f).sp,
+                fontFamily = reader.fontFamily,
                 fontWeight = if (header) FontWeight.Bold else FontWeight.Normal,
                 textAlign = when (aligns.getOrNull(index) ?: ColumnAlign.LEFT) {
                     ColumnAlign.LEFT -> TextAlign.Start
@@ -350,6 +408,8 @@ fun BlockView(
     block: MdBlock,
     onCopy: (String) -> Unit = {},
     isInsideList: Boolean = false,
+    /** 点击任务列表的复选框时回调（item, 新状态）；null 表示不可点击 */
+    onToggleTask: ((ListItem, Boolean) -> Unit)? = null,
 ) {
     val reader = LocalReaderStyle.current
     when (block) {
@@ -358,6 +418,7 @@ fun BlockView(
             text = block.text.toAnnotated(),
             fontSize = reader.fontSizeSp.sp,
             lineHeight = reader.lineHeightSp.sp,
+            fontFamily = reader.fontFamily,
             textAlign = if (block.text.displayMath) TextAlign.Center else TextAlign.Start,
             modifier = Modifier
                 .fillMaxWidth()
@@ -367,7 +428,7 @@ fun BlockView(
                 ),
         )
         is MdBlock.Code -> CodeBlock(block, onCopy)
-        is MdBlock.BulletList -> ListBlock(block)
+        is MdBlock.BulletList -> ListBlock(block, onToggleTask)
         is MdBlock.Quote -> QuoteBlock(block)
         is MdBlock.Table -> TableBlock(block)
         MdBlock.Divider -> HorizontalDivider(

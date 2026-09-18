@@ -48,6 +48,10 @@ class SettingsStore(context: Context) {
     var themeName by mutableStateOf(prefs.getString(KEY_THEME, "BLUE") ?: "BLUE")
         private set
 
+    /** 正文字体：SYSTEM / SERIF / MONO */
+    var fontFamilyKey by mutableStateOf(prefs.getString(KEY_FONT_FAMILY, "SYSTEM") ?: "SYSTEM")
+        private set
+
     fun setFontSize(value: Int) {
         fontSizeSp = value.coerceIn(FONT_MIN, FONT_MAX)
         prefs.edit().putInt(KEY_FONT, fontSizeSp).apply()
@@ -88,6 +92,11 @@ class SettingsStore(context: Context) {
         prefs.edit().putString(KEY_THEME, themeName).apply()
     }
 
+    fun updateFontFamilyKey(value: String) {
+        fontFamilyKey = value
+        prefs.edit().putString(KEY_FONT_FAMILY, fontFamilyKey).apply()
+    }
+
     fun reset() {
         setFontSize(DEFAULT_FONT)
         setMargin(DEFAULT_MARGIN)
@@ -97,6 +106,7 @@ class SettingsStore(context: Context) {
         updateKeepScreenOn(false)
         updateShowProgress(true)
         updateThemeName("BLUE")
+        updateFontFamilyKey("SYSTEM")
     }
 
     companion object {
@@ -109,6 +119,7 @@ class SettingsStore(context: Context) {
         private const val KEY_KEEP_ON = "keep_screen_on"
         private const val KEY_PROGRESS = "show_progress"
         private const val KEY_THEME = "theme"
+        private const val KEY_FONT_FAMILY = "font_family"
 
         const val FONT_MIN = 10
         const val FONT_MAX = 40
