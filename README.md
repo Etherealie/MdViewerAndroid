@@ -6,6 +6,12 @@
 
 ## 更新记录
 
+**v1.2**（试用后提的三点）
+- 修复：**按返回键直接退 App** —— 现在依次是「退出编辑 → 关面板 → 回文件列表」，文件列表按两下才退出
+- 新增：**9 套配色主题**（经典蓝 / 森林绿 / 青碧 / 静谧紫 / 绯樱 / 日落橙 / 石墨灰 / 米黄护眼 / 跟随壁纸）
+- 扩大：字号 10~40sp、边距 0~96dp、行距 100%~300%，另加字号预设按钮
+- 新增：**段落间距**、**阅读时屏幕常亮**、**阅读进度百分比**
+
 **v1.1**（装到手机试用后提的三点 + 一点）
 - 新增：文件列表右下角 **＋ 新建 Markdown 文件**
 - 新增：阅读页 **右侧细滚动条**（可拖动、可点击跳转，可在设置里关掉）
@@ -34,27 +40,29 @@ MdViewerAndroid/
         │       ├── MainActivity.kt            Activity 入口 + 页面切换（AppRoot）
         │       ├── data/DocStore.kt           用 SAF 列目录、读文件、写文件、新建文件、记最近打开
         │       ├── data/DocNames.kt           新建文件时的文件名规整（纯 Kotlin，可单测）
-        │       ├── data/SettingsStore.kt      字号 / 边距 / 行距 / 滚动条开关，写进 SharedPreferences
+        │       ├── data/SettingsStore.kt      字号 / 边距 / 行距 / 段落间距 / 主题 / 开关，写进 SharedPreferences
         │       ├── markdown/MdModel.kt        数据结构：MdBlock / InlineText / TocEntry
         │       ├── markdown/InlineParser.kt   行内解析：**粗体** `代码` [链接](url) 公式 $...$
         │       ├── markdown/MarkdownParser.kt 块级解析：标题/列表/表格/代码块/引用/front matter
         │       ├── markdown/MathRenderer.kt   LaTeX -> Unicode + 上下标样式（\alpha -> α 等）
         │       └── ui/
-        │           ├── Theme.kt               Material3 明暗两套配色
-        │           ├── ReaderStyle.kt         阅读字号/行距的 CompositionLocal
+        │           ├── AppTheme.kt            9 套配色主题（只定义主色，其余颜色自动推导）
+        │           ├── Theme.kt               Material3 主题入口
+        │           ├── ReaderStyle.kt         阅读排版参数的 CompositionLocal
         │           ├── MarkdownView.kt        把解析结果画到屏幕上（InlineText → AnnotatedString）
         │           ├── ScrollIndicator.kt     自己实现的右侧细滚动条（可拖可点）
-        │           ├── SettingsSheet.kt       阅读设置面板
+        │           ├── SettingsSheet.kt       阅读设置面板（字号/排版/配色/显示）
         │           └── Screens.kt             选文件夹页 / 文件列表页 / 阅读页 + 大纲
         └── test/java/com/mdviewer/
             ├── markdown/MarkdownParserTest.kt 20 个用例
             ├── markdown/MathRendererTest.kt   21 个用例
-            └── data/DocNamesTest.kt           7 个用例
+            ├── data/DocNamesTest.kt           7 个用例
+            └── ui/AppThemeTest.kt             4 个用例
 ```
 
 **分层思路**（这是本项目最值得看的部分）：
 `markdown/` 和 `data/DocNames.kt` **完全不依赖 Android**，只吃 `String`、吐数据类。
-所以它们能用普通的 JVM 单元测试跑（`gradlew test`，共 48 个用例），改渲染层时不用碰。
+所以它们能用普通的 JVM 单元测试跑（`gradlew test`，共 52 个用例），改渲染层时不用碰。
 `ui/` 只负责把数据类画出来，`data/DocStore.kt` 只负责拿文件。
 
 ---
@@ -67,19 +75,35 @@ MdViewerAndroid/
 | 文件列表 | 递归列出所有 `.md/.markdown/.txt/.rst`；顶部按文件名过滤；分组显示「最近打开」；右下角 **＋ 按钮新建 Markdown 文件**（自动补 `.md`、过滤非法字符，建完直接进编辑） |
 | 阅读页 | 标题/正文/代码块/表格/任务列表/引用/**数学公式**渲染；代码块可点「复制」；**右侧细滚动条**（可拖动、可点击跳转）；右上角依次是**设置**、**大纲**、**编辑** |
 
-返回键：编辑状态下按返回是「取消编辑」，不会退出阅读页。
+返回键：阅读页里依次是「退出编辑 → 关面板 → 回文件列表」；文件列表是主页，按两下才退出。
 
 ### 阅读设置（齿轮按钮）
 
 | 项目 | 范围 | 说明 |
 |---|---|---|
-| 正文字号 | 12 ~ 28 sp | 标题、代码、表格字号都按比例跟着缩放 |
-| 左右边距 | 0 ~ 48 dp | 正文距屏幕边缘的距离 |
-| 行距 | 120% ~ 220% | |
+| 正文字号 | 10 ~ 40 sp | 另有 小/标准/大/特大/超大 五个预设；标题、代码、表格字号都按比例跟着缩放 |
+| 段落间距 | 0 ~ 40 dp | 段与段之间的留白 |
+| 左右页边距 | 0 ~ 96 dp | 正文距屏幕边缘的距离 |
+| 行距 | 100% ~ 300% | |
+| 配色 | 9 套 | 见下 |
 | 显示滚动条 | 开 / 关 | 关掉后右侧不再显示细滚动条 |
+| 阅读时屏幕常亮 | 开 / 关 | 看文档时不让屏幕自动熄灭 |
+| 显示阅读进度 | 开 / 关 | 标题下方显示「xx% 已读」 |
 
 设置面板里有实时预览，调完直接关掉即可（拖动时后面的正文已经在变）。
 所有设置写进 `SharedPreferences`，下次打开还是你调好的样子。
+
+### 配色主题
+
+| 主题 | 深色模式 | 说明 |
+|---|---|---|
+| 经典蓝 / 森林绿 / 青碧 / 静谧紫 / 绯樱 / 日落橙 / 石墨灰 | ✅ 各自单独配色 | 只换主色，背景保持白/黑 |
+| **米黄护眼** | ✅ 暖色深色 | 背景、代码块、表格、边框整套换成米黄色，长时间读文档不刺眼 |
+| **跟随壁纸** | ✅ | Android 12+ 用系统取色（Material You）；低版本自动退回经典蓝 |
+
+实现上每套主题只定义**一个主色**，其余颜色（容器色、边框、代码背景等）由 `AppTheme.kt`
+用 `lerp` 与背景混合推导，所以以后加一套主题只需加一行。
+点色点立刻全局变色，包括设置面板自己。
 
 ### 数学公式
 
@@ -176,9 +200,9 @@ D:\Android\Sdk\platform-tools\adb.exe install -r d:\codefiles\MdViewerAndroid\md
 | 项目 | 结果 |
 |---|---|
 | Gradle 编译 | `BUILD SUCCESSFUL`，零警告、零错误 |
-| 单元测试 | `gradlew test` 通过，**48 个用例 0 失败**（解析器 20 + 公式 21 + 文件名 7） |
+| 单元测试 | `gradlew test` 通过，**52 个用例 0 失败**（解析器 20 + 公式 21 + 文件名 7 + 主题 4） |
 | 解析器（独立 kotlinc 验证） | 67 项断言全过；解析真实中文文档 6853 字符 → 75 个块、21 个标题 |
-| APK 校验 | 9.23 MB；包名 `com.mdviewer`；minSdk 26 / targetSdk 35；`aapt2 dump badging` 正常 |
+| APK 校验 | 9.19 MB；包名 `com.mdviewer`；版本 1.2（versionCode 3）；minSdk 26 / targetSdk 35；`aapt2 dump badging` 正常 |
 | APK 签名 | `apksigner verify` 通过，证书为 `CN=Android Debug`（debug 签名） |
 
 **未验证**：真机／模拟器上的实际运行与观感（本机没连设备，也没装模拟器镜像）。
