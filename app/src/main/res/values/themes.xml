@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 用系统自带的 Material 主题做壳，真正的界面全部由 Compose 绘制，
+         所以这里不需要 AppCompat / Material Components 依赖。 -->
+    <style name="Theme.MdViewer" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>

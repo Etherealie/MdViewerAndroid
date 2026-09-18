@@ -1,0 +1,15 @@
+*.iml
+.gradle/
+.kotlin/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+# 签名文件绝对不能提交（里面是你的私钥）
+*.jks
+*.keystore
