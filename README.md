@@ -14,24 +14,6 @@
 
 **v1.0** 首次版本：文件树、大纲跳转、编辑保存、深色模式、GBK 兼容
 
----
-
-## 一、跑起来（第一次约 20~30 分钟，主要是下载 SDK）
-
-1. 装 **Android Studio**（<https://developer.android.com/studio>），一路默认。
-   它会自带 JDK、Android SDK 和模拟器，不需要你另外装什么。
-2. 启动后选 **Open**，打开这个文件夹：`d:\codefiles\MdViewerAndroid`。
-3. 首次打开会自动 Sync（下载 Gradle + 依赖，几百 MB，耐心等）。
-4. 建一个手机模拟器：**Device Manager → Create Device**（选 Pixel 7 之类，系统镜像选
-   API 34/35），或者直接用 USB 连真机（手机开「开发者选项 → USB 调试」）。
-5. 点绿色的 ▶ **Run**。App 启动后先选一个存放 `.md` 的文件夹，
-   建议直接把手机里的 `Documents` 或你同步文档的目录选中。
-
-> **不想装 Android Studio**：本机已经装好了命令行工具链，直接看第五节，
-> 两条命令就能出 APK，并且已经成功产出过一次（`mdviewer-debug.apk`，9.13 MB）。
-
----
-
 ## 二、工程结构
 
 ```
@@ -87,7 +69,7 @@ MdViewerAndroid/
 
 返回键：编辑状态下按返回是「取消编辑」，不会退出阅读页。
 
-### 阅读设置（右上角齿轮）
+### 阅读设置（齿轮按钮）
 
 | 项目 | 范围 | 说明 |
 |---|---|---|
