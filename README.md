@@ -3,8 +3,6 @@
 自己用的 Markdown 阅读 App，Kotlin + Jetpack Compose 编写，**不依赖任何第三方库**
 （Markdown 解析器、公式转换器、滚动条都是自己写的，只用 Compose 官方组件）。
 
-> 这是 Windows 上那个 `mdviewer`（Python + 浏览器）的手机版。
-> 两者共用同一套解析规则：同样的标题、列表、表格、代码块、任务列表、front matter。
 
 ## 更新记录
 
