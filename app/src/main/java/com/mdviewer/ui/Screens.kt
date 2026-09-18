@@ -1,10 +1,13 @@
 package com.mdviewer.ui
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -22,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -51,14 +55,18 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,6 +79,7 @@ import com.mdviewer.data.SettingsStore
 import com.mdviewer.markdown.MdBlock
 import com.mdviewer.markdown.MdDocument
 import com.mdviewer.markdown.MarkdownParser
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
 // ---------------------------------------------------------------------------
@@ -153,6 +162,19 @@ fun FileListScreen(
     var query by remember { mutableStateOf("") }
     var showNewDialog by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    val context = LocalContext.current
+
+    // 文件列表是主页，返回键按两下才退出，避免误触
+    var lastBackAt by remember { mutableLongStateOf(0L) }
+    BackHandler(enabled = true) {
+        val now = System.currentTimeMillis()
+        if (now - lastBackAt < 2000L) {
+            context.findActivity()?.finish()
+        } else {
+            lastBackAt = now
+            Toast.makeText(context, "再按一次返回退出", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     val filtered = remember(entries, query) {
         if (query.isBlank()) entries
@@ -380,7 +402,32 @@ fun ReaderScreen(
         loading = false
     }
 
-    BackHandler(enabled = editing) { editing = false }
+    // 返回键的处理顺序：先退出编辑 → 再关面板 → 最后才回到文件列表。
+    // 之前只处理了"编辑中"，其余情况没接管，系统就直接把 App 退出了。
+    BackHandler(enabled = true) {
+        when {
+            editing -> editing = false
+            settingsOpen -> settingsOpen = false
+            tocOpen -> tocOpen = false
+            else -> onBack()
+        }
+    }
+
+    // 阅读时保持屏幕常亮（离开页面自动撤销）
+    val view = LocalView.current
+    DisposableEffect(settings.keepScreenOn) {
+        val window = view.context.findActivity()?.window
+        if (settings.keepScreenOn) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            if (settings.keepScreenOn) {
+                window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -391,7 +438,12 @@ fun ReaderScreen(
                     }
                 },
                 title = {
-                    Text(entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 16.sp)
+                    Column {
+                        Text(entry.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 16.sp)
+                        if (settings.showProgress && !editing) {
+                            ReadingProgress(listState)
+                        }
+                    }
                 },
                 actions = {
                     if (editing) {
@@ -527,6 +579,33 @@ fun ReaderScreen(
             }
         }
     }
+}
+
+/** 标题下的阅读进度。单独抽出来，滚动时只重组这一小块，不影响整页 */
+@Composable
+private fun ReadingProgress(state: LazyListState) {
+    val info = state.layoutInfo
+    val total = info.totalItemsCount
+    if (total <= 1) return
+    val first = info.visibleItemsInfo.firstOrNull() ?: return
+    val inItem = ((first.offset - info.viewportStartOffset).toFloat() /
+        first.size.coerceAtLeast(1)).coerceIn(0f, 1f)
+    val fraction = ((first.index + inItem) / total).coerceIn(0f, 1f)
+    Text(
+        text = "${(fraction * 100).roundToInt()}% 已读",
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** 从 Compose 的 Context 里一路往内找 Activity（可能是被包装过的） */
+private fun Context.findActivity(): Activity? {
+    var current: Context? = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
 }
 
 /** 标题 id -> 它在块列表里的下标，用于点大纲跳转 */

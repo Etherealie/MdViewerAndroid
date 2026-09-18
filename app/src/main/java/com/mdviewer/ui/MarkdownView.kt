@@ -362,8 +362,8 @@ fun BlockView(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(
-                    top = if (isInsideList) 2.dp else 5.dp,
-                    bottom = if (isInsideList) 2.dp else 5.dp,
+                    top = if (isInsideList) 2.dp else reader.paragraphPaddingDp.dp,
+                    bottom = if (isInsideList) 2.dp else reader.paragraphPaddingDp.dp,
                 ),
         )
         is MdBlock.Code -> CodeBlock(block, onCopy)

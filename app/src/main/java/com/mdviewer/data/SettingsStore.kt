@@ -28,8 +28,24 @@ class SettingsStore(context: Context) {
     var lineHeightPercent by mutableIntStateOf(prefs.getInt(KEY_LINE, DEFAULT_LINE))
         private set
 
+    /** 段落之间的额外间距，单位 dp */
+    var paragraphSpacingDp by mutableIntStateOf(prefs.getInt(KEY_PARAGRAPH, DEFAULT_PARAGRAPH))
+        private set
+
     /** 是否显示滚动条 */
     var showScrollbar by mutableStateOf(prefs.getBoolean(KEY_SCROLLBAR, true))
+        private set
+
+    /** 阅读时不让屏幕自动熄灭 */
+    var keepScreenOn by mutableStateOf(prefs.getBoolean(KEY_KEEP_ON, false))
+        private set
+
+    /** 在标题栏显示阅读进度百分比 */
+    var showProgress by mutableStateOf(prefs.getBoolean(KEY_PROGRESS, true))
+        private set
+
+    /** 配色主题名（存字符串是为了兼容以后重命名枚举） */
+    var themeName by mutableStateOf(prefs.getString(KEY_THEME, "BLUE") ?: "BLUE")
         private set
 
     fun setFontSize(value: Int) {
@@ -47,16 +63,40 @@ class SettingsStore(context: Context) {
         prefs.edit().putInt(KEY_LINE, lineHeightPercent).apply()
     }
 
+    fun setParagraphSpacing(value: Int) {
+        paragraphSpacingDp = value.coerceIn(PARAGRAPH_MIN, PARAGRAPH_MAX)
+        prefs.edit().putInt(KEY_PARAGRAPH, paragraphSpacingDp).apply()
+    }
+
     fun setScrollbarVisible(value: Boolean) {
         showScrollbar = value
         prefs.edit().putBoolean(KEY_SCROLLBAR, showScrollbar).apply()
+    }
+
+    fun updateKeepScreenOn(value: Boolean) {
+        keepScreenOn = value
+        prefs.edit().putBoolean(KEY_KEEP_ON, keepScreenOn).apply()
+    }
+
+    fun updateShowProgress(value: Boolean) {
+        showProgress = value
+        prefs.edit().putBoolean(KEY_PROGRESS, showProgress).apply()
+    }
+
+    fun updateThemeName(value: String) {
+        themeName = value
+        prefs.edit().putString(KEY_THEME, themeName).apply()
     }
 
     fun reset() {
         setFontSize(DEFAULT_FONT)
         setMargin(DEFAULT_MARGIN)
         setLineHeight(DEFAULT_LINE)
+        setParagraphSpacing(DEFAULT_PARAGRAPH)
         setScrollbarVisible(true)
+        updateKeepScreenOn(false)
+        updateShowProgress(true)
+        updateThemeName("BLUE")
     }
 
     companion object {
@@ -64,18 +104,26 @@ class SettingsStore(context: Context) {
         private const val KEY_FONT = "font_size"
         private const val KEY_MARGIN = "margin"
         private const val KEY_LINE = "line_height"
+        private const val KEY_PARAGRAPH = "paragraph_spacing"
         private const val KEY_SCROLLBAR = "show_scrollbar"
+        private const val KEY_KEEP_ON = "keep_screen_on"
+        private const val KEY_PROGRESS = "show_progress"
+        private const val KEY_THEME = "theme"
 
-        const val FONT_MIN = 12
-        const val FONT_MAX = 28
+        const val FONT_MIN = 10
+        const val FONT_MAX = 40
         const val DEFAULT_FONT = 16
 
         const val MARGIN_MIN = 0
-        const val MARGIN_MAX = 48
+        const val MARGIN_MAX = 96
         const val DEFAULT_MARGIN = 16
 
-        const val LINE_MIN = 120
-        const val LINE_MAX = 220
+        const val LINE_MIN = 100
+        const val LINE_MAX = 300
         const val DEFAULT_LINE = 175
+
+        const val PARAGRAPH_MIN = 0
+        const val PARAGRAPH_MAX = 40
+        const val DEFAULT_PARAGRAPH = 6
     }
 }

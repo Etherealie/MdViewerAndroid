@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.mdviewer.data.DocEntry
 import com.mdviewer.data.DocStore
 import com.mdviewer.data.SettingsStore
+import com.mdviewer.ui.AppTheme
 import com.mdviewer.ui.FileListScreen
 import com.mdviewer.ui.LocalReaderStyle
 import com.mdviewer.ui.MdViewerTheme
@@ -39,14 +40,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MdViewerTheme {
+            val settings = remember { SettingsStore(applicationContext) }
+            MdViewerTheme(theme = AppTheme.fromName(settings.themeName)) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    val settings = remember { SettingsStore(applicationContext) }
                     CompositionLocalProvider(
                         LocalReaderStyle provides ReaderStyle(
                             fontSizeSp = settings.fontSizeSp,
                             marginDp = settings.marginDp,
                             lineHeightPercent = settings.lineHeightPercent,
+                            paragraphSpacingDp = settings.paragraphSpacingDp,
                         ),
                     ) {
                         AppRoot(settings)
